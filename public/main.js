@@ -157,20 +157,30 @@ const UI = {
                 </p>`
         );
     },
-    appendInbox: ({ ownerId, originalname, timestamp, checked, fileId }) => {
+    appendInbox: ({
+        ownerId,
+        originalname,
+        timestamp,
+        checked,
+        fileId,
+        deleted,
+    }) => {
         $("#timesheets").append(
             `         <div class="col-lg-3">
-                        <div data-filekey="${fileId}" class="timesheet-single ${
+                        <div data-filekey="${fileId}" data-deletedbyowner="${deleted.toString()}" class="timesheet-single ${
                 checked ? "checked" : ""
-            } 
-                        d-flex align-items-center justify-content-center flex-column">
+            } d-flex align-items-center justify-content-center flex-column">
                             <p><i class="bi bi-filetype-pdf" style="font-size: 36px"></i></p>
                             <p> ${originalname}</p>
                             <p> ${ownerId}</p>
                             <p> ${timestamp}</p>
                         </div>
                         <div class="d-grid">
-                            <button style="border-radius: 0px" data-filekey="${fileId}" class="downloadBtn btn btn-secondary"><i class="bi bi-file-earmark-arrow-down"></i></button>
+                            <button style="border-radius: 0px" data-filekey="${fileId}" ${
+                deleted === true ? "disabled" : ""
+            } class="downloadBtn btn btn-secondary"><i class="bi bi-file-earmark-arrow-down"></i> ${
+                deleted === true ? "deleted by owner." : ""
+            }</button>
                         </div>
                     </div>
                     `
@@ -455,6 +465,11 @@ const UI = {
         // Timesheets Handlers
         $("body").on("click", ".timesheet-single", (e) => {
             const filekey = $(e.target).data("filekey");
+            // string to boolean coercion
+            const wasDeleted = Boolean($(e.target).data("deletedbyowner"));
+
+            // TODO: get filekey on child node if undefined....
+            if (wasDeleted == true || filekey === undefined) return;
 
             const successHandler = () => {
                 $(e.target).toggleClass("checked");

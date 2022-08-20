@@ -29,8 +29,8 @@ const JsonStorage = (function () {
         remove(fileId) {
             this.markDataChanged(true);
 
-            // delete from mem
-            delete FilesBuffer[fileId];
+            // mark as deleted
+            FilesBuffer[fileId].deleted = true;
 
             // unlink in def queue
             fs.unlink(`uploads/${fileId}`, (err) => {
@@ -139,8 +139,6 @@ const JsonStorage = (function () {
     const Inbox = {
         check: (id, fileId) => {
             const entry = get(id);
-            console.log(fileId);
-            console.log(entry.inbox);
 
             let updatedInbox = { ...entry.inbox };
             updatedInbox[fileId].checked = !updatedInbox[fileId].checked;
@@ -151,7 +149,7 @@ const JsonStorage = (function () {
             };
 
             store(id, updatedEntry);
-        },
+        }
     };
 
     return {
@@ -178,6 +176,8 @@ app.get("/data", (req, res) => {
     const entryExists = fs.existsSync(`storage/${ownerId}.json`);
     let entry = JsonStorage.get(ownerId);
 
+    // update inbox if some file was removed / sent 
+
     const trueInbox = Object.entries(entry.inbox).map(
         ([fileId, { checked }]) => {
             const fileData = JsonStorage.Files.getOne(fileId);
@@ -185,7 +185,7 @@ app.get("/data", (req, res) => {
             return {
                 ...fileData,
                 checked,
-                fileId
+                fileId,
             };
         }
     );
@@ -204,7 +204,7 @@ app.get("/data", (req, res) => {
     //     )
     //     .flat();
 
-    const userFiles = JsonStorage.Files.get(ownerId);
+    const userFiles = JsonStorage.Files.get(ownerId).filter(({deleted}) => !deleted);
 
     if (!entryExists) res.json([]);
     else res.json({ ...entry, inbox: trueInbox, data: userFiles });
