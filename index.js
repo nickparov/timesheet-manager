@@ -83,30 +83,6 @@ const JsonStorage = (function () {
         return JSON.parse(fs.readFileSync(`storage/${id}.json`));
     }
 
-    // const _Files = {
-    //     remove: (id, filename) => {
-    //         const entry = get(id);
-    //         const updatedData = entry.data.filter(
-    //             (elem) => elem.filename !== filename
-    //         );
-    //         const updatedEntry = {
-    //             ...entry,
-    //             data: updatedData,
-    //         };
-
-    //         // rewrite file content
-    //         store(id, updatedEntry);
-    //     },
-    //     exists: (id, filename) => {
-    //         return (
-    //             get(id).data.find((elem, idx) => elem.filename === filename) !==
-    //             undefined
-    //         );
-    //     },
-    //     get: (id, filename) =>
-    //         get(id).data.find((el) => el.filename === filename),
-    // };
-
     const Receivers = {
         remove: (id, receiverIdx) => {
             const entry = get(id);
@@ -149,7 +125,7 @@ const JsonStorage = (function () {
             };
 
             store(id, updatedEntry);
-        }
+        },
     };
 
     return {
@@ -167,17 +143,16 @@ function successMsg(msg) {
     return { success: true, message: msg };
 }
 
-app.get("/home", (req, res) => {
-    res.sendFile(path.join(__dirname, "public/home.html"));
-});
-
 app.get("/data", (req, res) => {
+
+    // TODO: Admin sdk verify tokenID
+    // req.headers.idtoken
+
     const ownerId = "MYKYTA_PAROVYI";
     const entryExists = fs.existsSync(`storage/${ownerId}.json`);
     let entry = JsonStorage.get(ownerId);
 
-    // update inbox if some file was removed / sent 
-
+    // update inbox if some file was removed / sent
     const trueInbox = Object.entries(entry.inbox).map(
         ([fileId, { checked }]) => {
             const fileData = JsonStorage.Files.getOne(fileId);
@@ -190,24 +165,17 @@ app.get("/data", (req, res) => {
         }
     );
 
-    // const trueInbox = entry.inbox
-    //     .map(({ owner, filename, checked }) =>
-    //         JsonStorage.get(owner)
-    //             .data.filter((ownerFile) => ownerFile.filename === filename)
-    //             .map((_) => {
-    //                 return {
-    //                     ..._,
-    //                     owner,
-    //                     checked,
-    //                 };
-    //             })
-    //     )
-    //     .flat();
-
-    const userFiles = JsonStorage.Files.get(ownerId).filter(({deleted}) => !deleted);
+    // get user files not deleted
+    const userFiles = JsonStorage.Files.get(ownerId).filter(
+        ({ deleted }) => !deleted
+    );
 
     if (!entryExists) res.json([]);
     else res.json({ ...entry, inbox: trueInbox, data: userFiles });
+});
+
+app.get("/dashboard", (req, res) => {
+    res.sendFile(path.resolve(__dirname, "public/Dashboard.html"));
 });
 
 app.get("/people", (req, res) => {
@@ -225,24 +193,12 @@ app.post("/upload", upload.single("timesheet"), function (req, res) {
     // save to storage info about whose file is for whoom
     const ownerId = "MYKYTA_PAROVYI";
 
-    // const entry = fs.existsSync(`storage/${id}.json`) && JsonStorage.get(id);
-    // let updatedEntry = {
-    //     data: [{ filename, originalname, timestamp }],
-    //     receivers: [],
-    // };
-    // if exists already
-    // if (entry) {
-    //     updatedEntry = {
-    //         ...entry,
-    //         data: [...entry.data, { filename, originalname, timestamp }],
-    //     };
-    // }
-    // // save
-    // JsonStorage.store(id, updatedEntry);
-    // return all files
-
     // add
-    JsonStorage.Files.add(filename, ownerId, { originalname, timestamp });
+    JsonStorage.Files.add(filename, ownerId, {
+        originalname,
+        timestamp,
+        deleted: false,
+    });
 
     // return
     res.json(JsonStorage.Files.get(ownerId));
