@@ -233,11 +233,26 @@ const Pagination = ({
     );
 };
 
+const NoTimesheetsElement = () => {
+    return (
+        <div>
+            <p
+                className={
+                    "p-4 border mt-4 d-flex justify-content-center emptyTsParagraph"
+                }
+            >
+                <i style={{paddingRight: "10px"}} className={"bi bi-hourglass"}></i>{" "}
+                <span className={"pl-4"}>No timesheets were submitted to you yet.</span>
+            </p>
+        </div>
+    );
+};
+
 // Container Component
 const Timesheet = () => {
     const [tsData, setTsData] = useState([]);
     const [searchKey, setSearchKey] = useState("");
-    const [sortFuncID, setSortFuncID] = useState("none");
+    const [sortFuncID, setSortFuncID] = useState("submissiondate");
     const [sortReverted, setSortReverted] = useState(false);
     const [totalPagPages, setTotalPagPages] = useState(0);
     const [currPagPage, setCurrPagPage] = useState(0);
@@ -304,6 +319,7 @@ const Timesheet = () => {
             setSortReverted(false);
         }
     }
+
     // 1. Pagination rules
     toRenderArr =
         totalPagPages > 0
@@ -324,8 +340,7 @@ const Timesheet = () => {
 
     // 3. Sorting
     if (sortFuncID !== "none") {
-        toRenderArr = sortTools
-            .performSort(toRenderArr, sortFuncID);
+        toRenderArr = sortTools.performSort(toRenderArr, sortFuncID);
     }
 
     if (sortReverted) {
@@ -333,9 +348,14 @@ const Timesheet = () => {
     }
 
     // 4. Map tsses to react elems arr
-    toRender = toRenderArr.map((data) => (
-        <TimesheetElement data={data} key={data.fileId} />
-    ));
+    toRender =
+        toRenderArr.length !== 0 ? (
+            toRenderArr.map((data) => (
+                <TimesheetElement data={data} key={data.fileId} />
+            ))
+        ) : (
+            <NoTimesheetsElement />
+        );
 
     return (
         <React.Fragment>
@@ -352,6 +372,7 @@ const Timesheet = () => {
                         aria-label="Search"
                         id="searhBar"
                         onChange={searchBarKeywordHandler}
+                        disabled={toRenderArr.length === 0}
                     />
                 </form>
                 <button
@@ -360,6 +381,7 @@ const Timesheet = () => {
                     data-bs-toggle="dropdown"
                     aria-expanded="false"
                     id="sortBtn"
+                    disabled={toRenderArr.length === 0}
                 >
                     Sort
                 </button>

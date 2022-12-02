@@ -1,9 +1,19 @@
 const express = require("express");
 const path = require("path");
+const fs = require("fs");
 const app = express();
 const port = 3000;
 
-const fs = require("fs");
+// Firebase
+var admin = require("firebase-admin");
+
+var serviceAccount = require("./keys/timesheet-manager-ad983-firebase-adminsdk-selhn-b8aedd0b6c.json");
+
+const adminApp = admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+});
+
+const auth = admin.auth();
 
 // File stuff config
 const multer = require("multer");
@@ -20,9 +30,49 @@ function getTimestamptStr() {
     return mm + "/" + dd + "/" + yyyy;
 }
 
+async function checkToken(req, res, next) {
+    try {
+        const TOKEN = req.headers.idtoken;
+        // console.log("TOKEN", TOKEN)
+
+        if (!TOKEN) {
+            res.status(404).send({ message: "Not Found!" });
+            return;
+        }
+
+        // verify token in firebase
+        req.uData = await verifyToken(TOKEN);
+
+        // proceed
+        next();
+        return;
+    } catch (error) {
+        console.error(error);
+        res.status(500).send({
+            message: "Server error occured, try again later.",
+        });
+        return;
+    }
+}
+
+async function verifyToken(token) {
+    return new Promise(async (resolve, reject) => {
+        try {
+            // verify token in firebase
+            const uData = await auth.verifyIdToken(token);
+
+            resolve(uData);
+        } catch (error) {
+            reject(error);
+        }
+    });
+}
+
 // local storage personal json
 const JsonStorage = (function () {
     const FilesBuffer = JSON.parse(fs.readFileSync(`storage/FILES.json`));
+    const MappingsBuffer = JSON.parse(fs.readFileSync(`storage/MAPPING.json`));
+
     let dataChanged = false;
 
     const Files = {
@@ -42,6 +92,7 @@ const JsonStorage = (function () {
         },
         add(filename, ownerId, dataObj) {
             this.markDataChanged(true);
+
             FilesBuffer[filename] = { ...dataObj, ownerId };
         },
         exists(fileId) {
@@ -80,7 +131,11 @@ const JsonStorage = (function () {
     function remove(id) {}
 
     function get(id) {
-        return JSON.parse(fs.readFileSync(`storage/${id}.json`));
+        try {
+            return JSON.parse(fs.readFileSync(`storage/${id}.json`));
+        } catch (error) {
+            throw error;
+        }
     }
 
     const Receivers = {
@@ -126,7 +181,30 @@ const JsonStorage = (function () {
 
             store(id, updatedEntry);
         },
+        append: (uid, fileId) => {
+            //  case 1: new file was sent by someone.
+            //  "d3227232f366204a7107abe05abb95aa": { "checked": true }
+            const userEntry = get(uid);
+
+            const oldInbox = { ...userEntry.inbox };
+            const updatedInbox = { ...oldInbox, [fileId]: { checked: false } };
+
+            const updatedEntry = {
+                ...userEntry,
+                inbox: updatedInbox
+            }
+
+
+            // store updated entry.
+            store(uid, updatedEntry);
+        },
     };
+
+    const Mappings = {
+        all() {
+            return MappingsBuffer;
+        }
+    }
 
     return {
         store: store,
@@ -136,6 +214,7 @@ const JsonStorage = (function () {
         Files: Files,
         Receivers: Receivers,
         Inbox: Inbox,
+        Mappings: Mappings
     };
 })();
 
@@ -143,16 +222,28 @@ function successMsg(msg) {
     return { success: true, message: msg };
 }
 
-app.get("/data", (req, res) => {
+app.get("/data", checkToken, async (req, res) => {
+    const { email, uid } = req.uData;
 
-    // TODO: Admin sdk verify tokenID
-    // req.headers.idtoken
+    console.log(uid);
 
-    const ownerId = "MYKYTA_PAROVYI";
-    const entryExists = fs.existsSync(`storage/${ownerId}.json`);
-    let entry = JsonStorage.get(ownerId);
+    const entryExists = fs.existsSync(`storage/${uid}.json`);
 
-    // update inbox if some file was removed / sent
+    // if no file exist on user.
+    if (!entryExists) {
+        // res.status(400).json({err: "No such entry!"});
+
+        // register
+        // Create new data entry in json db.
+        JsonStorage.store(uid, {
+            receivers: [],
+            inbox: {},
+            email: email
+        });
+    }
+
+    let entry = JsonStorage.get(uid);
+    // update inbox if some file was removed / sent.
     const trueInbox = Object.entries(entry.inbox).map(
         ([fileId, { checked }]) => {
             const fileData = JsonStorage.Files.getOne(fileId);
@@ -165,14 +256,17 @@ app.get("/data", (req, res) => {
         }
     );
 
-    // get user files not deleted
-    const userFiles = JsonStorage.Files.get(ownerId).filter(
+    // get user files not deleted.
+    const userFiles = JsonStorage.Files.get(uid).filter(
         ({ deleted }) => !deleted
     );
 
-    if (!entryExists) res.json([]);
-    else res.json({ ...entry, inbox: trueInbox, data: userFiles });
+    res.json({ ...entry, inbox: trueInbox, data: userFiles });
 });
+
+// app.get("/login", (req, res) => {
+//     res.sendFile(path.resolve(__dirname, "public/Login.html"));
+// });
 
 app.get("/dashboard", (req, res) => {
     res.sendFile(path.resolve(__dirname, "public/Dashboard.html"));
@@ -184,14 +278,46 @@ app.get("/people", (req, res) => {
     res.json(peopleArr);
 });
 
-app.post("/upload", upload.single("timesheet"), function (req, res) {
+app.post("/upload", upload.single("timesheet"), async function (req, res) {
+    // req.file is the name of your file in the form above, here 'uploaded_file'
+    // req.body will hold the text fields, if there were any
+    let uData = null;
+
+    // do token checks
+    try {
+        uData = await verifyToken(req.body.idtoken);
+    } catch (error) {
+        res.status(401).json({ message: "Auth failed!" });
+        return;
+    }
+
+    // proceed
+    const { filename, originalname } = req.file;
+    const timestamp = getTimestamptStr();
+
+    // save to storage info about whose file is for whoom
+    const ownerId = uData.uid;
+
+    // add
+    JsonStorage.Files.add(filename, ownerId, {
+        originalname,
+        timestamp,
+        deleted: false,
+    });
+
+    // return file data
+    res.json(JsonStorage.Files.get(ownerId));
+});
+/*
+app.post("/upload", upload.single("timesheet"),  function (req, res) {
+    console.log(req.body);
     // curr user info
     // uploaded file info
     const { filename, originalname } = req.file;
     const timestamp = getTimestamptStr();
 
     // save to storage info about whose file is for whoom
-    const ownerId = "MYKYTA_PAROVYI";
+    const ownerId = req.uData.uid;
 
     // add
     JsonStorage.Files.add(filename, ownerId, {
@@ -203,6 +329,7 @@ app.post("/upload", upload.single("timesheet"), function (req, res) {
     // return
     res.json(JsonStorage.Files.get(ownerId));
 });
+*/
 
 app.post("/remove/file", (req, res) => {
     const filename = req.body.filekey;
@@ -222,17 +349,43 @@ app.post("/remove/file", (req, res) => {
     res.json(successMsg("Successfuly Removed File."));
 });
 
-app.post("/remove/receiver", (req, res) => {
+app.post("/send/file", checkToken, (req, res) => {
+    const fileId = req.body.fileId;
+    const ownerId = req.uData.uid;
+    const receiverEmail = req.body.email;
+
+    
+
+    // check user entry to contain that file
+    // TODO polish
+    const fileExistsOnUser = JsonStorage.Files.exists(fileId);
+
+    if (!fileExistsOnUser) {
+        res.status(404).json({ message: "File entry not found on this user!" });
+        return;
+    }
+    
+    const mappings = JsonStorage.Mappings.all();
+    const receiverUid = mappings[receiverEmail];
+
+    // add to inbox of receiver user
+    JsonStorage.Inbox.append(receiverUid, fileId);
+
+    res.json(successMsg("Successfuly sent timesheet to person."));
+});
+
+app.post("/remove/receiver", checkToken, (req, res) => {
     const receiverIdx = req.body.receiverIdx;
-    const id = "MYKYTA_PAROVYI";
+    console.log(req.uData);
+    const id = req.uData.uid;
 
     JsonStorage.Receivers.remove(id, receiverIdx);
 
     res.json(successMsg("Successfuly Removed Receiver."));
 });
 
-app.post("/add/receiver", (req, res) => {
-    const id = "MYKYTA_PAROVYI";
+app.post("/add/receiver", checkToken, (req, res) => {
+    const id = req.uData.uid;
     const { email } = req.body;
 
     JsonStorage.Receivers.add(id, { email });
@@ -240,20 +393,20 @@ app.post("/add/receiver", (req, res) => {
     res.json(successMsg("Successfully Added Receiver!"));
 });
 
-app.post("/check/timesheet", (req, res) => {
-    const id = "MYKYTA_PAROVYI";
+app.post("/check/timesheet", checkToken, (req, res) => {
+    const ownerId = req.uData.uid;
 
     const { fileId } = req.body;
 
-    JsonStorage.Inbox.check(id, fileId);
+    JsonStorage.Inbox.check(ownerId, fileId);
 
     res.json(successMsg("Successfully marked timesheet!"));
 });
 
-app.post("/download", async (req, res) => {
+app.post("/download", checkToken, async (req, res) => {
     // TODO: check ownership of file
     // TODO: check existance
-    const ownerId = "MYKYTA_PAROVYI";
+    const ownerId = req.uData.uid;
     const fileId = req.body.fileId;
 
     // get from storage

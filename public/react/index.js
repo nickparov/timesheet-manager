@@ -9,6 +9,6 @@ const { default: CORE } = require("./core");
 const { Timesheet } = require("./Timesheet");
 
 // React Rendering Rules
-const domContainer = document.querySelector("#timesheets-container");
-const root = ReactDOM.createRoot(domContainer);
+const tsContainer = document.querySelector("#timesheets-container");
+const root = ReactDOM.createRoot(tsContainer);
 root.render(<Timesheet />);
